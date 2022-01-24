@@ -5,7 +5,6 @@ import sys
 import numpy as np
 import tensorflow as tf
 import matplotlib
-matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import pandas as pd
 
@@ -45,18 +44,6 @@ class SRCNN:
         self.learning_rate = tf.compat.v1.train.exponential_decay(learning_rate, self.global_step, 100000, 0.96)
         self._build_graph()
 
-    def _normalize(self):
-        with tf.compat.v1.variable_scope("normalize_inputs", reuse=tf.compat.v1.AUTO_REUSE) as scope:
-            self.x_norm = tf.compat.v1.layers.batch_normalization(
-                self.x, trainable=False, epsilon=1e-6, center=False, scale=False, training=self.is_training)
-        with tf.compat.v1.variable_scope("normalize_labels", reuse=tf.compat.v1.AUTO_REUSE) as scope:
-            self.y_norm = tf.compat.v1.layers.batch_normalization(
-                self.y, trainable=False, epsilon=1e-6, scale=False, training=self.is_training)     
-            scope.reuse_variables()
-            self.y_mean = tf.compat.v1.get_variable('batch_normalization/moving_mean')
-            self.y_variance = tf.compat.v1.get_variable('batch_normalization/moving_variance')
-            self.y_beta = tf.compat.v1.get_variable('batch_normalization/beta')
-
     def _inference(self, X):
         for i, k in enumerate(self.filter_sizes):
             with tf.compat.v1.variable_scope("hidden_%i" % i) as scope:
@@ -65,18 +52,12 @@ class SRCNN:
                 else:
                     activation = tf.nn.relu
                 pad_amt = int((k-1)/2)
-                X = _maybe_pad_x(X, pad_amt, self.is_training)
                 X = tf.compat.v1.layers.conv2d(X, self.layer_sizes[i], k, activation=activation)
         return X
 
     def _loss(self, predictions):
         with tf.compat.v1.name_scope("loss"):
-            # if training then crop center of y, else, padding was applied
-            slice_amt = (np.sum(self.filter_sizes) - len(self.filter_sizes)) / 2
-            slice_y = self.y_norm[:,slice_amt:-slice_amt, slice_amt:-slice_amt]
-            _y = tf.cond(pred=self.is_training, true_fn=lambda: slice_y, false_fn=lambda: self.y_norm)
-            tf.subtract(predictions, _y)
-            err = tf.square(predictions - _y)
+            err = tf.square(predictions - self.y)
             err_filled = utils.fill_na(err, 0)
             finite_count = tf.reduce_sum(input_tensor=tf.cast(tf.math.is_finite(err), tf.float32))
             mse = tf.reduce_sum(input_tensor=err_filled) / finite_count
@@ -104,13 +85,9 @@ class SRCNN:
         tf.compat.v1.summary.scalar('rmse', self.rmse)
 
     def _build_graph(self):
-        self._normalize()
         with tf.device(self.device):
-            _prediction_norm = self._inference(self.x_norm)
-            self.loss = self._loss(_prediction_norm)
+            self.prediction = self._inference(self.x)
+            self.loss = self._loss(self.prediction)
             self._optimize()
-
-        self.prediction = _prediction_norm * tf.sqrt(self.y_variance) + self.y_mean
-        self.rmse = tf.sqrt(utils.nanmean(tf.square(self.prediction - self.y)),
-                            name='rmse')
+        self.rmse = tf.sqrt(utils.nanmean(tf.square(self.prediction - self.y)), name='rmse')
         self._summaries()
