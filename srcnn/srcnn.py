@@ -24,12 +24,9 @@ class SRCNN:
         y,
         layer_sizes,
         filter_sizes,
-        input_depth=1,
         learning_rate=1e-4,
-        device='/gpu:0',
-        upscale_factor=2,
-        output_depth=1,
         is_training=True,
+        device='/gpu:0',
     ):
         '''
         Args:
@@ -40,17 +37,14 @@ class SRCNN:
         self.x = x
         self.y = y
         self.is_training = is_training
-        self.upscale_factor = upscale_factor
         self.layer_sizes = layer_sizes
         self.filter_sizes = filter_sizes
-        self.input_depth = input_depth
-        self.output_depth = output_depth
         self.learning_rate = learning_rate
         self.device = device
         self.global_step = tf.Variable(0, trainable=False)
-        self.learning_rate = tf.compat.v1.train.exponential_decay(
-            learning_rate, self.global_step, 100000, 0.96
-        )
+        # self.learning_rate = tf.compat.v1.train.exponential_decay(
+        #     learning_rate, self.global_step, 100000, 0.96
+        # )
         self._build_graph()
 
     def _inference(self, X):
@@ -60,6 +54,8 @@ class SRCNN:
                     activation = None
                 else:
                     activation = tf.nn.relu
+                pad_amt = int((k - 1) / 2)
+                X = _maybe_pad_x(X, pad_amt, self.is_training)
                 X = tf.compat.v1.layers.conv2d(X, self.layer_sizes[i], k, activation=activation)
         return X
 
